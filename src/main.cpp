@@ -1,129 +1,114 @@
+#include <Wire.h>
 #include <Servo.h>
-#include <Arduino.h>
+#include <Stepper.h>
 
-// define pins
+const int servoPin = 6;
+const int servoPin2 = 7;
+const int inductiveSensorPin = 4;
+const int irSensor1 = 5;
 const int moisturePin = A0;
-const int servoPin = 9;
 
 
-/*@ Author: Jakob Fahey
-    I'm not sure how moisture sensors work, but this is just proof of concept, we declare
-     some 'thresholds' at the top so the machine understands what is what.
-*/
-const int plasticThreshold = 200;
-const int metalThreshold = 400;
-const int biodegradeThreshold = 600;
-const int idfklolThreshold = 800;
+bool itemDetected = false;
 
-const int defaultServoAngle = 0;
-const int rotationDuration = 5000;  // 5s
+Servo servo1;
+Servo servo2;
 
-// creating the servo object
-Servo myServoBins;
-Servo trapDoorLeft;
-Servo trapDoorRight;
+const int stepsPerRevolution = 2048;
+Stepper myStepper = Stepper(stepsPerRevolution, 8, 10, 9, 11);
 
-void setup() {
+int inductiveValue = LOW;
+
+void setup(){
+  pinMode(irSensor1, INPUT);
+  servo1.attach(servoPin);
+  servo2.attach(servoPin2);
+  servo1.write(0);
+  servo2.write(80);
+  pinMode(inductiveSensorPin, INPUT);
   Serial.begin(9600);
-  myServoBins.attach(servoPin);
-}
-
-/*@ Author: Jakob Fahey
-    This function detects the moisture level of the material in the machine.
-     I'm unsure about what we need to do for infrared but thaty can be implemented easily.
-*/
-int detectMaterialType(int moistureLevel) {
-  if (moistureLevel <= plasticThreshold) {
-    Serial.println("Plastic detected");
-    return 1;  // Plastic
-  } else if (moistureLevel <= metalThreshold) {
-    Serial.println("Metal detected");
-    return 2;  // Metal
-  } else if (moistureLevel <= biodegradeThreshold) {
-    Serial.println("Biodegradable detected");
-    return 3;  // Biodegradable
-  } else if (moistureLevel <= idfklolThreshold) {
-    Serial.println("idfklol detected");
-    return 4;  // Placeholder material type
-  } else {
-    Serial.println("Unknown material or out of range");
-    return 0;  // Unknown material
-  }
-}
-
-/*@ Author: Jakob Fahey
-    This function rotates the Servo motor to the correct angle based on what was deteced in the detection phase.
-    These values are just all placeholders for proof of concept.
-*/
-
-void rotateServo(int materialType) {
-  int servoAngle;
-
-  switch (materialType) {
-    case 1:
-      servoAngle = 30;
-      break;
-
-    case 2:
-      servoAngle = 60;
-      break;
-
-    case 3:
-      servoAngle = 90;
-      break;
-
-    case 4:
-      servoAngle = 120;
-      break;
-
-    default:
-      servoAngle = defaultServoAngle;
-      break;
-  }
-
-  // rotate to angle
-  myServoBins.write(servoAngle);
-
-  // wait 5s
-  delay(rotationDuration);
-
-}
-
-/*@ Author: Jakob Fahey
-    This function rotates the Servo motor trapdoors to the open state, then the closed state.
-*/
-
-void openTrapdoors(int openDoorL, int openDoorR) {
-  trapDoorLeft.write(openDoorL);
-  trapDoorRight.write(openDoorR);
-
-  // wait for material to drop in
-  delay(5000);
-
-  // close the trapdoor
-  trapDoorLeft.write(defaultServoAngle);
-  trapDoorRight.write(defaultServoAngle);
 }
 
 void loop() {
-  // read moisture
-  int moistureLevel = analogRead(moisturePin);
-
-  // detect type
-  int materialType = detectMaterialType(moistureLevel);
-
-  // rotate
-  rotateServo(materialType);
-
-  //open trapdoor
-  openTrapdoors(45, 135);  // adjust angles to what we need later
-
-  //second delay just to make sure it gets in there
-  delay(1000);
-
-  // return to default
-  myServoBins.write(defaultServoAngle);
-
- // delay for the loop
-  delay(1000);
+  MetalTest();
+  WetTest();
+  bool IsMetal = MetalTest();
+  bool IsWet = WetTest();
+  int irValue = digitalRead(irSensor1);  // Read the value from the IR sensor
+  
+  if ((irValue == 0))
+  {
+    itemDetected = true;
+    delay(1500);
+    
+    if (IsMetal && itemDetected)
+    {
+      Serial.println("Metal Waste");
+      MoveStepper(0.33);
+      openBin();
+      delay(2000);
+      closeBin();
+      MoveStepper(1-0.33);
+      delay(2000);
+    }
+    else if (IsWet && itemDetected) 
+    {
+      Serial.println("Wet Waste");
+      MoveStepper(0.66);
+      openBin();
+      delay(2000);
+      closeBin();
+      MoveStepper(1-0.66);
+      delay(2000);
+    }
+    else
+    {
+      Serial.println("Dry Waste");
+      delay(2000);
+      openBin();
+      closeBin();
+      delay(2000);
+    }
+    
+    itemDetected = false;
+  }
 }
+
+void openBin() {
+  servo2.write(0);
+  delay(500);
+  servo1.write(140);
+  delay(2000);
+}
+
+void closeBin() {
+  servo1.write(0);
+  delay(500);
+  servo2.write(80);
+  delay(2000);
+}
+
+void MoveStepper(float x) {
+	myStepper.setSpeed(10);
+	myStepper.step(x*stepsPerRevolution);
+	delay(1000);
+}   
+
+bool MetalTest() {
+  int inductiveValue = digitalRead(inductiveSensorPin);
+  if (inductiveValue == 1) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
+bool WetTest() {
+  int moistureValue = analogRead(moisturePin);
+  if (moistureValue > 900) {
+    return false;
+  } else {
+    return true;
+  }
+}
+
